@@ -3,42 +3,53 @@ FROM resin/armv7hf-debian-qemu
 RUN [ "cross-build-start" ]
 
 RUN apt-get update \
-    && apt-get upgrade -y \
-    && apt-get install -y build-essential libssl-dev zlib1g-dev libbz2-dev \
-       libreadline-dev libsqlite3-dev wget curl llvm libncurses5-dev libncursesw5-dev \
-       xz-utils tk-dev libffi-dev liblzma-dev python-openssl git python3-ujson
+    && apt-get upgrade -y
 
-RUN apt install -y curl
+RUN apt-get install -y build-essential libssl-dev zlib1g-dev libbz2-dev \
+    libreadline-dev libsqlite3-dev wget curl llvm libncurses5-dev libncursesw5-dev \
+    xz-utils tk-dev libffi-dev liblzma-dev libssl-dev libgdbm-dev libc6-dev git
+
+SHELL ["/bin/bash", "-c"]
+
+ENV HOME="/root"
+ENV NODE_VERSION=11.1.0
+
+RUN wget https://www.openssl.org/source/openssl-1.1.1c.tar.gz \
+    && tar xzf openssl-1.1.1c.tar.gz \
+    && cd openssl-1.1.1c \
+    && ./config --prefix=$HOME \
+    && make \
+    && make install
+
 RUN curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.35.3/install.sh | bash
-ENV NVM_DIR=/root/.nvm
-RUN . "$NVM_DIR/nvm.sh" && nvm install ${NODE_VERSION}
-RUN . "$NVM_DIR/nvm.sh" && nvm use v${NODE_VERSION}
-RUN . "$NVM_DIR/nvm.sh" && nvm alias default v${NODE_VERSION}
+
+RUN [[ -s $HOME/.nvm/nvm.sh ]] && . $HOME/.nvm/nvm.sh \
+    nvm install ${NODE_VERSION} \
+    && nvm use v${NODE_VERSION} \
+    && nvm alias default v${NODE_VERSION}
+
 ENV PATH="/root/.nvm/versions/node/v${NODE_VERSION}/bin/:${PATH}"
 RUN node --version
 RUN npm --version
 
-ENV PATH="/root/.pyenv/bin:$PATH"
+RUN wget https://www.python.org/ftp/python/3.7.3/Python-3.7.3.tgz \
+    && tar xzf Python-3.7.3.tgz \
+    && cd Python-3.7.3 \
+    && ./configure --prefix=$HOME --with-openssl=/root LDFLAGS="-Wl,-rpath=/root/lib -L/root/lib" \
+    && make \
+    && make install
 
-RUN curl https://pyenv.run | bash \
-    && echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc \
-    && echo 'export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc \
-    && echo 'export LC_ALL=C.UTF-8' \
-    && echo 'export LANG=C.UTF-8' \
-    && echo 'if command -v pyenv 1>/dev/null 2>&1; then\n  eval "$(pyenv init -)"\nfi' >> ~/.bashrc
+ENV PATH="/root/bin:${PATH}"
 
-RUN pyenv install 3.7.8 \
-    && pyenv global 3.7.8 \
-    && pyenv local 3.7.8
+RUN ln -s /root/bin/python3 /root/bin/python \
+    && curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py \
+    && python get-pip.py \
+    && pip install --upgrade pip
 
-RUN curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py \
-    && python3 get-pip.py
+RUN python -m pip install pipenv
 
-RUN python3 -m pip install python-language-server flake8 autopep8 \
-    && python3 -m pip install pipenv \
-    && apt-get install -y yarn \
-    && apt-get clean \
-    && apt-get auto-remove -y \
+RUN apt-get clean \
+    && apt-get autoremove \
     && rm -rf /var/cache/apt/* \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /tmp/*
@@ -47,11 +58,17 @@ RUN mkdir -p /home/theia \
     && mkdir -p /home/project
 WORKDIR /home/theia
 
+RUN cd /opt \
+    && wget https://yarnpkg.com/latest.tar.gz \
+    && tar zvxf latest.tar.gz
+
+ENV PATH="/opt/yarn-v1.22.5/bin:${PATH}"
+
 ARG version=latest
 ADD $version.package.json ./package.json
 ARG GITHUB_TOKEN
 RUN yarn --cache-folder ./ycache && rm -rf ./ycache && \
-     NODE_OPTIONS="--max_old_space_size=16344" yarn theia build ; \
+    NODE_OPTIONS="--max_old_space_size=16344" yarn theia build ; \
     yarn theia download:plugins
 EXPOSE 3000
 ENV SHELL=/bin/bash \
